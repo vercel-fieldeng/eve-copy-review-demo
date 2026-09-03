@@ -124,25 +124,27 @@ function AgentMessagePart({
       return <AuthorizationPrompt part={part} />;
     case "dynamic-tool": {
       const inputRequest = part.toolMetadata?.eve?.inputRequest;
-      if (inputRequest?.kind === "question") {
-        return (
+      const question =
+        inputRequest?.kind === "question" ? (
           <QuestionRequest
             canRespond={canRespond}
             inputRequest={inputRequest}
             inputResponse={part.toolMetadata?.eve?.inputResponse}
             onInputResponses={onInputResponses}
           />
-        );
-      }
+        ) : null;
 
       if (part.toolName === "review_copy") {
         return (
-          <ReviewCopyTool
-            canRespond={canRespond}
-            onInputResponses={onInputResponses}
-            part={part}
-          />
+          <div className="flex flex-col gap-3">
+            {question}
+            <ReviewCopyTool part={part} />
+          </div>
         );
+      }
+
+      if (question) {
+        return question;
       }
 
       return (
@@ -182,18 +184,10 @@ function AgentMessagePart({
  * escalation, then returns the final score report. Render each phase natively
  * and keep the raw tool panel available underneath for the demo.
  */
-function ReviewCopyTool({
-  canRespond,
-  onInputResponses,
-  part,
-}: {
-  readonly canRespond: boolean;
-  readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
-  readonly part: EveDynamicToolPart;
-}) {
+function ReviewCopyTool({ part }: { readonly part: EveDynamicToolPart }) {
   const output = part.output;
   const isDone = part.state === "output-available";
-  const inputRequest = part.toolMetadata?.eve?.inputRequest;
+  const isWaitingOnHuman = Boolean(part.toolMetadata?.eve?.inputRequest) && !isDone;
 
   return (
     <div className="flex flex-col gap-3">
@@ -201,10 +195,9 @@ function ReviewCopyTool({
         <ReviewReport result={output} />
       ) : isReviewProgress(output) ? (
         <ReviewProgress progress={output} />
-      ) : inputRequest ? null : (
+      ) : isWaitingOnHuman ? null : (
         <ReviewProgress progress={{ phase: "reviewing", iteration: 1, maxIterations: 3 }} />
       )}
-      <InputRequestActions canRespond={canRespond} part={part} onInputResponses={onInputResponses} />
       <Tool>
         <ToolHeader
           state={part.state}
