@@ -40,6 +40,7 @@ import {
 } from "@/components/ai-elements/tool";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { ReviewProgress, ReviewReport, isReviewProgress, isReviewResult } from "./review-report";
 
 export type AgentInputResponse = {
   readonly optionId?: string;
@@ -134,6 +135,16 @@ function AgentMessagePart({
         );
       }
 
+      if (part.toolName === "review_copy") {
+        return (
+          <ReviewCopyTool
+            canRespond={canRespond}
+            onInputResponses={onInputResponses}
+            part={part}
+          />
+        );
+      }
+
       return (
         <Tool
           defaultOpen={part.state === "approval-requested" || part.state === "approval-responded"}
@@ -163,6 +174,51 @@ function AgentMessagePart({
       );
     }
   }
+}
+
+/**
+ * The `review_copy` Workflow tool streams `yield` snapshots while the outer
+ * loop runs (review -> score -> rewrite), pauses on `ask()` for human
+ * escalation, then returns the final score report. Render each phase natively
+ * and keep the raw tool panel available underneath for the demo.
+ */
+function ReviewCopyTool({
+  canRespond,
+  onInputResponses,
+  part,
+}: {
+  readonly canRespond: boolean;
+  readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
+  readonly part: EveDynamicToolPart;
+}) {
+  const output = part.output;
+  const isDone = part.state === "output-available";
+  const inputRequest = part.toolMetadata?.eve?.inputRequest;
+
+  return (
+    <div className="flex flex-col gap-3">
+      {isDone && isReviewResult(output) ? (
+        <ReviewReport result={output} />
+      ) : isReviewProgress(output) ? (
+        <ReviewProgress progress={output} />
+      ) : inputRequest ? null : (
+        <ReviewProgress progress={{ phase: "reviewing", iteration: 1, maxIterations: 3 }} />
+      )}
+      <InputRequestActions canRespond={canRespond} part={part} onInputResponses={onInputResponses} />
+      <Tool>
+        <ToolHeader
+          state={part.state}
+          title="review_copy (Workflow run)"
+          toolName={part.toolName}
+          type="dynamic-tool"
+        />
+        <ToolContent>
+          <ToolInput input={part.input} />
+          <ToolOutput errorText={part.errorText} output={part.output} />
+        </ToolContent>
+      </Tool>
+    </div>
+  );
 }
 
 function QuestionRequest({
