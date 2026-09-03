@@ -14,15 +14,19 @@ import { Message, MessageContent } from "@/components/ai-elements/message";
 import {
   PromptInput,
   PromptInputButton,
+  PromptInputFooter,
   type PromptInputMessage,
+  PromptInputProvider,
   PromptInputSubmit,
   PromptInputTextarea,
+  PromptInputTools,
   usePromptInputAttachments,
+  usePromptInputController,
 } from "@/components/ai-elements/prompt-input";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 import { AgentMessage } from "./agent-message";
+import { SampleGrid, SampleMenu } from "./sample-picker";
 
 const AGENT_NAME = "salomon-copy-review";
 
@@ -34,7 +38,6 @@ export function AgentChat({
   readonly sessionless?: boolean;
 }) {
   const [cancellationError, setCancellationError] = useState<string>();
-  const [hasInputText, setHasInputText] = useState(false);
   const agent = useEveAgent({
     initialSession:
       sessionId === undefined
@@ -80,126 +83,130 @@ export function AgentChat({
     });
   };
 
-  const handleSubmit = async (message: PromptInputMessage) => {
+  const handleSubmit = (message: PromptInputMessage) => {
     const text = message.text.trim();
     if ((text.length === 0 && message.files.length === 0) || isResuming) return;
 
-    setHasInputText(false);
     setCancellationError(undefined);
     const options = isBusy ? { turnPolicy: "steer" as const } : undefined;
 
-    if (message.files.length === 0) {
-      await agent.send(text, options);
-      return;
+    let content: UserContent | string = text;
+    if (message.files.length > 0) {
+      const parts: UserContent = [];
+      if (text.length > 0) {
+        parts.push({ text, type: "text" });
+      }
+      for (const file of message.files) {
+        parts.push({
+          data: file.url,
+          filename: file.filename,
+          mediaType: file.mediaType,
+          type: "file",
+        });
+      }
+      content = parts;
     }
 
-    const parts: UserContent = [];
-    if (text.length > 0) {
-      parts.push({ text, type: "text" });
-    }
-    for (const file of message.files) {
-      parts.push({
-        data: file.url,
-        filename: file.filename,
-        mediaType: file.mediaType,
-        type: "file",
-      });
-    }
-
-    await agent.send(parts, options);
+    // Not awaited on purpose: the promise settles only when the whole turn
+    // finishes, and PromptInput clears the composer on resolution. Streaming
+    // state and failures are surfaced through `agent.status` / `agent.error`.
+    void agent.send(content, options).catch((error: unknown) => {
+      setCancellationError(toErrorMessage(error, "Unable to send the message."));
+    });
   };
 
   const composer = (
     <PromptInput onSubmit={handleSubmit}>
       <PromptInputTextarea
         disabled={isResuming}
-        onChange={(event) => setHasInputText(event.currentTarget.value.trim().length > 0)}
-        placeholder="Send a message…"
+        placeholder="Paste product copy, or pick a sample…"
       />
-      <ComposerAction
-        hasInputText={hasInputText}
-        isBusy={isBusy}
-        isResuming={isResuming}
-        onCancel={requestCancellation}
-      />
+      <PromptInputFooter>
+        <PromptInputTools>
+          <SampleMenu disabled={isResuming} />
+        </PromptInputTools>
+        <ComposerAction isBusy={isBusy} isResuming={isResuming} onCancel={requestCancellation} />
+      </PromptInputFooter>
     </PromptInput>
   );
 
   return (
-    <main className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
-      {showConversationLayout ? (
-        <ChatHeader canStartNewChat={activeSessionId !== undefined} />
-      ) : null}
+    <PromptInputProvider>
+      <main className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
+        {showConversationLayout ? (
+          <ChatHeader canStartNewChat={activeSessionId !== undefined} />
+        ) : null}
 
-      {showConversationLayout ? (
-        <Conversation
-          className="min-h-0 flex-1"
-          initial={sessionId === undefined ? undefined : false}
-          resize={activeSessionId === undefined ? "smooth" : "instant"}
-          scrollRestorationKey={
-            isEmpty || activeSessionId === undefined
-              ? undefined
-              : `eve:web-chat-scroll:${activeSessionId}`
-          }
-        >
-          <ConversationTopFade className="top-14" />
-          <ConversationContent className="mx-auto w-full max-w-3xl gap-6 px-4 pt-20 pb-36 sm:px-6">
-            {agent.data.messages.map((message, index) =>
-              showPendingThinking &&
-              isPendingAssistantShell &&
-              message.id === lastMessage.id ? null : (
-                <AgentMessage
-                  canRespond={!isBusy && !isResuming}
-                  isStreaming={
-                    agent.status === "streaming" && index === agent.data.messages.length - 1
-                  }
-                  key={message.id}
-                  message={message}
-                  onInputResponses={(inputResponses) => {
-                    setCancellationError(undefined);
-                    return agent.respond(inputResponses);
-                  }}
-                />
-              ),
-            )}
-            {showPendingThinking ? <PendingThinking /> : null}
-            {errorMessage ? <ErrorMessage message={errorMessage} /> : null}
-          </ConversationContent>
-          <ConversationScrollButton />
-        </Conversation>
-      ) : null}
+        {showConversationLayout ? (
+          <Conversation
+            className="min-h-0 flex-1"
+            initial={sessionId === undefined ? undefined : false}
+            resize={activeSessionId === undefined ? "smooth" : "instant"}
+            scrollRestorationKey={
+              isEmpty || activeSessionId === undefined
+                ? undefined
+                : `eve:web-chat-scroll:${activeSessionId}`
+            }
+          >
+            <ConversationTopFade className="top-14" />
+            <ConversationContent className="mx-auto w-full max-w-3xl gap-6 px-4 pt-20 pb-40 sm:px-6">
+              {agent.data.messages.map((message, index) =>
+                showPendingThinking &&
+                isPendingAssistantShell &&
+                message.id === lastMessage.id ? null : (
+                  <AgentMessage
+                    canRespond={!isBusy && !isResuming}
+                    isStreaming={
+                      agent.status === "streaming" && index === agent.data.messages.length - 1
+                    }
+                    key={message.id}
+                    message={message}
+                    onInputResponses={(inputResponses) => {
+                      setCancellationError(undefined);
+                      return agent.respond(inputResponses);
+                    }}
+                  />
+                ),
+              )}
+              {showPendingThinking ? <PendingThinking /> : null}
+              {errorMessage ? <ErrorMessage message={errorMessage} /> : null}
+            </ConversationContent>
+            <ConversationScrollButton />
+          </Conversation>
+        ) : null}
 
-      <div
-        className={cn(
-          "mx-auto w-full px-4 sm:px-6",
-          showConversationLayout
-            ? "fixed bottom-0 left-1/2 z-20 max-w-3xl -translate-x-1/2 bg-gradient-to-t from-background via-background to-transparent pt-4 pb-6"
-            : "flex max-w-xl flex-1 flex-col items-center justify-center gap-8 pb-[10vh]",
-        )}
-      >
-        {showConversationLayout ? null : (
-          <div className="flex flex-col items-center gap-3 text-center">
-            <h1 className="font-medium text-5xl tracking-tighter">{AGENT_NAME}</h1>
+        {showConversationLayout ? (
+          <div className="fixed bottom-0 left-1/2 z-20 w-full max-w-3xl -translate-x-1/2 bg-gradient-to-t from-background via-background to-transparent px-4 pt-4 pb-6 sm:px-6">
+            {composer}
+          </div>
+        ) : (
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 sm:px-6">
+            <div className="m-auto flex w-full max-w-2xl flex-col items-center gap-8 py-10">
+              <div className="flex flex-col items-center gap-3 text-center">
+                <h1 className="font-medium text-5xl tracking-tighter">{AGENT_NAME}</h1>
+              </div>
+              <div className="w-full">{composer}</div>
+              <SampleGrid />
+            </div>
           </div>
         )}
-        <div className="w-full">{composer}</div>
-      </div>
-    </main>
+      </main>
+    </PromptInputProvider>
   );
 }
 
 function ComposerAction({
-  hasInputText,
   isBusy,
   isResuming,
   onCancel,
 }: {
-  readonly hasInputText: boolean;
   readonly isBusy: boolean;
   readonly isResuming: boolean;
   readonly onCancel: () => void;
 }) {
+  const controller = usePromptInputController();
   const attachments = usePromptInputAttachments();
+  const hasInputText = controller.textInput.value.trim().length > 0;
   const canSubmit = hasInputText || attachments.files.length > 0;
 
   if (!isBusy || canSubmit) {
@@ -273,8 +280,8 @@ function PendingThinking() {
   );
 }
 
-function toErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "Unable to cancel the response.";
+function toErrorMessage(error: unknown, fallback = "Unable to cancel the response."): string {
+  return error instanceof Error ? error.message : fallback;
 }
 
 function getLatestTurnFailure(
