@@ -17,6 +17,15 @@ import { type ReviewerOutcome, type ScoreReport, buildScoreReport } from "../lib
 const MAX_ITERATIONS = 3;
 
 /**
+ * The eve harness walks tool outputs with `Object.entries`, which throws on
+ * `undefined` leaves. Round-trip through JSON so optional fields the reviewers
+ * or the scorer left unset are dropped rather than crashing the turn.
+ */
+function toJson<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+/**
  * Outer loop of the Salomon copywriting agent, run as a durable Vercel
  * Workflow:
  *
@@ -63,14 +72,14 @@ export default defineTool({
 
       if (report.verdict === "approved") {
         history.push({ iteration, report, changeNotes: [] });
-        return {
+        return toJson({
           status: "approved" as const,
           iterations: iteration,
           original,
           final: current,
           report,
           history: history.map(summarizeIteration),
-        };
+        });
       }
 
       if (report.verdict === "escalate") {
@@ -88,7 +97,7 @@ export default defineTool({
           ],
         });
 
-        return {
+        return toJson({
           status: "escalated" as const,
           decision: decision.optionId ?? "manual",
           iterations: iteration,
@@ -96,7 +105,7 @@ export default defineTool({
           final: decision.optionId === "abandon" ? original : current,
           report,
           history: history.map(summarizeIteration),
-        };
+        });
       }
 
       // 3a. Bounded rewrite.
