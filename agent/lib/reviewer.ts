@@ -34,6 +34,11 @@ export function defineReviewer(axis: ReviewAxis, options: { readonly model: stri
         return defineAgent({
           description: options.description,
           model: options.model,
+          modelOptions: {
+            providerOptions: {
+              openai: { reasoningEffort: "medium", serviceTier: "priority" },
+            },
+          },
         });
       },
     },

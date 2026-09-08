@@ -1,5 +1,4 @@
-import { defineTool } from "eve/tools";
-import { agent, ask } from "eve/workflow";
+import { defineWorkflowTool, type WorkflowToolContext } from "eve/tools";
 import { z } from "zod";
 import {
   REVIEW_AXES,
@@ -39,7 +38,7 @@ function toJson<T>(value: T): T {
  * inside the workflow with a replay-stable key so a crash or redeploy mid-loop
  * resumes exactly where it stopped.
  */
-export default defineTool({
+export default defineWorkflowTool({
   description:
     "Run the full Salomon copy review loop on product copy. Dispatches the five review agents in parallel, scores their findings deterministically, rewrites up to three times, and escalates to a human if the copy still fails. Pass `sample` to use one of the built-in demo copies instead of `copy`.",
   inputSchema: z.object({
@@ -87,7 +86,7 @@ export default defineTool({
         yield { phase: "escalating", iteration, maxIterations, overall: report.overall };
 
         // 3b. Human escalation: the run parks here (no compute) until answered.
-        const decision = await ask(ctx, {
+        const decision = await ctx.ask({
           prompt: `After ${iteration} review iterations the copy still scores ${report.overall}/100 with ${report.blocking.length} blocking finding(s). How should we proceed?`,
           display: "confirmation",
           options: [
@@ -121,13 +120,13 @@ export default defineTool({
 });
 
 async function reviewAxis(
-  ctx: Parameters<typeof agent>[0],
+  ctx: WorkflowToolContext,
   axis: ReviewAxis,
   copy: CopyFields,
   iteration: number,
 ): Promise<ReviewerOutcome> {
   try {
-    const value = await agent(ctx, {
+    const value = await ctx.agent({
       key: `${axis}:${iteration}`,
       target: axis,
       outputSchema: findingSetJsonSchema,
@@ -140,7 +139,7 @@ async function reviewAxis(
 }
 
 async function rewriteCopy(
-  ctx: Parameters<typeof agent>[0],
+  ctx: WorkflowToolContext,
   copy: CopyFields,
   report: ScoreReport,
   iteration: number,
@@ -151,7 +150,7 @@ async function rewriteCopy(
     ),
   );
 
-  const value = await agent(ctx, {
+  const value = await ctx.agent({
     key: `rewrite:${iteration}`,
     target: "rewriter",
     outputSchema: rewriteJsonSchema,
